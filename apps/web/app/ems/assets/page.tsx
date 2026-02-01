@@ -1,54 +1,126 @@
 "use client";
 
 import { useState } from "react";
+import { useApi } from "../../hooks/useApi";
 import { DataTable } from "../../components/DataTable";
 import { FormModal } from "../../components/FormModal";
+import { LoadingSpinner } from "../../components/LoadingSpinner";
 
-const sampleAssets = [
-  { id: "AST-001", name: "Dell Laptop XPS 15", category: "IT Equipment", location: "HQ - Floor 3", status: "Active", purchaseDate: "2023-01-15", value: "$1,899" },
-  { id: "AST-002", name: "CNC Machine M1", category: "Machinery", location: "Factory A", status: "Active", purchaseDate: "2022-06-20", value: "$45,000" },
-  { id: "AST-003", name: "Herman Miller Chair", category: "Furniture", location: "HQ - Floor 2", status: "Active", purchaseDate: "2023-03-10", value: "$1,200" },
-  { id: "AST-004", name: "Toyota Forklift FL-12", category: "Vehicles", location: "Warehouse B", status: "Maintenance", purchaseDate: "2021-09-05", value: "$28,500" },
-  { id: "AST-005", name: "Server Dell R740", category: "IT Equipment", location: "Data Center", status: "Active", purchaseDate: "2022-11-30", value: "$8,500" },
-  { id: "AST-006", name: "Air Compressor AC-100", category: "Machinery", location: "Factory B", status: "Repair", purchaseDate: "2021-04-12", value: "$5,200" },
-  { id: "AST-007", name: "MacBook Pro 16\"", category: "IT Equipment", location: "HQ - Floor 4", status: "Active", purchaseDate: "2023-08-01", value: "$2,499" },
-];
+interface Asset {
+  id: string;
+  assetNumber: string;
+  name: string;
+  category: { name: string };
+  location: { name: string };
+  branch: { name: string };
+  status: string;
+  acquisitionDate: string;
+  acquisitionCost: number;
+  currentValue: number;
+  condition: string;
+  _count: {
+    maintenanceRecords: number;
+    repairOrders: number;
+  };
+}
+
+interface AssetsResponse {
+  data: Asset[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
 
 const statusColors: Record<string, string> = {
-  Active: "bg-green-100 text-green-800",
-  Maintenance: "bg-yellow-100 text-yellow-800",
-  Repair: "bg-red-100 text-red-800",
-  Retired: "bg-gray-100 text-gray-800",
+  ACTIVE: "bg-green-100 text-green-800",
+  MAINTENANCE: "bg-yellow-100 text-yellow-800",
+  REPAIR: "bg-red-100 text-red-800",
+  RETIRED: "bg-gray-100 text-gray-800",
+  DISPOSED: "bg-gray-100 text-gray-800",
+};
+
+const conditionColors: Record<string, string> = {
+  EXCELLENT: "bg-green-100 text-green-800",
+  GOOD: "bg-blue-100 text-blue-800",
+  FAIR: "bg-yellow-100 text-yellow-800",
+  POOR: "bg-orange-100 text-orange-800",
+  CRITICAL: "bg-red-100 text-red-800",
 };
 
 export default function AssetsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [page, setPage] = useState(1);
 
-  const filteredAssets = sampleAssets.filter(
-    (asset) =>
-      (asset.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        asset.id.toLowerCase().includes(searchQuery.toLowerCase())) &&
-      (filterStatus === "" || asset.status === filterStatus)
+  const queryParams = new URLSearchParams();
+  if (searchQuery) queryParams.set("search", searchQuery);
+  if (filterStatus) queryParams.set("status", filterStatus);
+  queryParams.set("page", page.toString());
+  queryParams.set("limit", "20");
+
+  const { data: response, loading, error } = useApi<AssetsResponse>(
+    `/api/assets?${queryParams.toString()}`
   );
 
+  const assets = response?.data || [];
+  const pagination = response?.pagination;
+
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat("en-MY", {
+      style: "currency",
+      currency: "MYR",
+    }).format(value);
+  };
+
+  const formatDate = (date: string) => {
+    return new Date(date).toLocaleDateString("en-MY");
+  };
+
   const columns = [
-    { key: "id", header: "Asset ID" },
+    { key: "assetNumber", header: "Asset ID" },
     { key: "name", header: "Name" },
-    { key: "category", header: "Category" },
-    { key: "location", header: "Location" },
+    {
+      key: "category",
+      header: "Category",
+      render: (item: Asset) => item.category?.name || "-",
+    },
+    {
+      key: "location",
+      header: "Location",
+      render: (item: Asset) => item.location?.name || "-",
+    },
     {
       key: "status",
       header: "Status",
-      render: (item: typeof sampleAssets[0]) => (
-        <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[item.status]}`}>
+      render: (item: Asset) => (
+        <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[item.status] || "bg-gray-100"}`}>
           {item.status}
         </span>
       ),
     },
-    { key: "purchaseDate", header: "Purchase Date" },
-    { key: "value", header: "Value" },
+    {
+      key: "condition",
+      header: "Condition",
+      render: (item: Asset) => (
+        <span className={`px-2 py-1 text-xs font-medium rounded-full ${conditionColors[item.condition] || "bg-gray-100"}`}>
+          {item.condition}
+        </span>
+      ),
+    },
+    {
+      key: "acquisitionDate",
+      header: "Purchase Date",
+      render: (item: Asset) => formatDate(item.acquisitionDate),
+    },
+    {
+      key: "currentValue",
+      header: "Current Value",
+      render: (item: Asset) => formatCurrency(item.currentValue),
+    },
   ];
 
   return (
@@ -89,19 +161,60 @@ export default function AssetsPage() {
           className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="">All Status</option>
-          <option value="Active">Active</option>
-          <option value="Maintenance">Maintenance</option>
-          <option value="Repair">Repair</option>
-          <option value="Retired">Retired</option>
+          <option value="ACTIVE">Active</option>
+          <option value="MAINTENANCE">Maintenance</option>
+          <option value="REPAIR">Repair</option>
+          <option value="RETIRED">Retired</option>
         </select>
       </div>
 
+      {error && (
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
+          Error loading assets: {error}
+        </div>
+      )}
+
       {/* Table */}
-      <DataTable
-        columns={columns}
-        data={filteredAssets}
-        onRowClick={(item) => window.location.href = `/ems/assets/${item.id}`}
-      />
+      {loading ? (
+        <div className="flex items-center justify-center h-64">
+          <LoadingSpinner />
+        </div>
+      ) : (
+        <>
+          <DataTable
+            columns={columns}
+            data={assets}
+            onRowClick={(item) => window.location.href = `/ems/assets/${item.id}`}
+          />
+          
+          {/* Pagination */}
+          {pagination && pagination.totalPages > 1 && (
+            <div className="mt-4 flex items-center justify-between">
+              <p className="text-sm text-gray-500">
+                Showing {(pagination.page - 1) * pagination.limit + 1} - {" "}
+                {Math.min(pagination.page * pagination.limit, pagination.total)} of{" "}
+                {pagination.total} assets
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="px-3 py-1 border border-gray-300 rounded-lg disabled:opacity-50 hover:bg-gray-50"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => setPage(p => Math.min(pagination.totalPages, p + 1))}
+                  disabled={page === pagination.totalPages}
+                  className="px-3 py-1 border border-gray-300 rounded-lg disabled:opacity-50 hover:bg-gray-50"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {/* Add Asset Modal */}
       <FormModal
