@@ -1,6 +1,77 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { useApi } from "../../contexts/AuthContext";
 import { DashboardCard } from "../../components/DashboardCard";
+import { LoadingSpinner } from "../../components/LoadingSpinner";
+
+interface DashboardStats {
+  totalEmployees: number;
+  activeEmployees: number;
+  newHiresThisMonth: number;
+  presentToday: number;
+  onLeave: number;
+  pendingClaims: number;
+  openPositions: number;
+  employeesByDepartment: Array<{ department: string; _count: { department: number } }>;
+}
+
+interface PendingApproval {
+  id: string;
+  type: string;
+  employeeName: string;
+  details: string;
+  submittedAt: string;
+}
 
 export default function HRMSDashboard() {
+  const { fetchWithAuth } = useApi();
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
+
+  const loadDashboardData = async () => {
+    try {
+      setIsLoading(true);
+      const [statsRes, approvalsRes] = await Promise.all([
+        fetchWithAuth("/api/dashboard/hrms"),
+        fetchWithAuth("/api/dashboard/hrms/pending-approvals"),
+      ]);
+
+      if (statsRes.ok) {
+        const statsData = await statsRes.json();
+        setStats(statsData);
+      }
+
+      if (approvalsRes.ok) {
+        const approvalsData = await approvalsRes.json();
+        setPendingApprovals(approvalsData);
+      }
+    } catch (error) {
+      console.error("Error loading dashboard:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <LoadingSpinner />
+      </div>
+    );
+  }
+
+  const departmentData = stats?.employeesByDepartment?.map((d) => ({
+    dept: d.department,
+    count: d._count.department,
+    percentage: Math.round((d._count.department / (stats?.totalEmployees || 1)) * 100),
+  })) || [];
+
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
@@ -19,37 +90,37 @@ export default function HRMSDashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <DashboardCard
           title="Total Employees"
-          value="342"
+          value={stats?.totalEmployees || 0}
           subtitle="Active staff"
           trend="up"
-          trendValue="8 new this month"
+          trendValue={`${stats?.newHiresThisMonth || 0} new this month`}
           icon="👥"
           color="blue"
         />
         <DashboardCard
           title="Present Today"
-          value="318"
-          subtitle="93% attendance"
+          value={stats?.presentToday || 0}
+          subtitle={`${stats?.totalEmployees ? Math.round((stats.presentToday / stats.totalEmployees) * 100) : 0}% attendance`}
           trend="up"
-          trendValue="2% from yesterday"
+          trendValue="Daily average"
           icon="✓"
           color="green"
         />
         <DashboardCard
           title="On Leave"
-          value="24"
+          value={stats?.onLeave || 0}
           subtitle="Today"
           trend="neutral"
-          trendValue="Average"
+          trendValue="Current"
           icon="🏖️"
           color="yellow"
         />
         <DashboardCard
           title="Open Positions"
-          value="12"
+          value={stats?.openPositions || 0}
           subtitle="Recruiting"
-          trend="down"
-          trendValue="3 filled"
+          trend="up"
+          trendValue="Active requisitions"
           icon="📝"
           color="purple"
         />
@@ -59,53 +130,48 @@ export default function HRMSDashboard() {
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <h2 className="text-lg font-semibold mb-4">Department Distribution</h2>
           <div className="space-y-4">
-            {[
-              { dept: "Production", count: 120, percentage: 35 },
-              { dept: "IT", count: 45, percentage: 13 },
-              { dept: "Sales & Marketing", count: 38, percentage: 11 },
-              { dept: "Operations", count: 42, percentage: 12 },
-              { dept: "HR & Admin", count: 25, percentage: 7 },
-              { dept: "R&D", count: 32, percentage: 9 },
-              { dept: "Finance", count: 20, percentage: 6 },
-              { dept: "Others", count: 20, percentage: 6 },
-            ].map((dept) => (
-              <div key={dept.dept}>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-medium">{dept.dept}</span>
-                  <span className="text-sm text-gray-500">{dept.count} ({dept.percentage}%)</span>
+            {departmentData.length > 0 ? (
+              departmentData.map((dept) => (
+                <div key={dept.dept}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-sm font-medium">{dept.dept}</span>
+                    <span className="text-sm text-gray-500">{dept.count} ({dept.percentage}%)</span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div
+                      className="bg-blue-600 h-2 rounded-full"
+                      style={{ width: `${dept.percentage}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div
-                    className="bg-blue-600 h-2 rounded-full"
-                    style={{ width: `${dept.percentage}%` }}
-                  />
-                </div>
-              </div>
-            ))}
+              ))
+            ) : (
+              <p className="text-gray-500">No department data available</p>
+            )}
           </div>
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold mb-4">Pending Approvals</h2>
-          <div className="space-y-3">
-            {[
-              { type: "Leave Request", employee: "John Smith", date: "Jan 25-28", days: "3 days" },
-              { type: "Expense Claim", employee: "Sarah Chen", date: "$450", days: "Submitted today" },
-              { type: "Overtime", employee: "Mike Johnson", date: "5 hours", days: "Yesterday" },
-              { type: "Leave Request", employee: "Lisa Wang", date: "Feb 1-3", days: "2 days" },
-              { type: "Expense Claim", employee: "David Lee", date: "$1,250", days: "2 days ago" },
-            ].map((item, idx) => (
-              <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div>
-                  <span className="font-medium text-sm">{item.type}</span>
-                  <p className="text-xs text-gray-500">{item.employee}</p>
+          <h2 className="text-lg font-semibold mb-4">Pending Approvals ({pendingApprovals.length})</h2>
+          <div className="space-y-3 max-h-80 overflow-y-auto">
+            {pendingApprovals.length > 0 ? (
+              pendingApprovals.map((item) => (
+                <div key={item.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div>
+                    <span className="font-medium text-sm">{item.type}</span>
+                    <p className="text-xs text-gray-500">{item.employeeName}</p>
+                  </div>
+                  <div className="text-right">
+                    <span className="font-medium text-sm">{item.details}</span>
+                    <p className="text-xs text-gray-500">
+                      {new Date(item.submittedAt).toLocaleDateString()}
+                    </p>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <span className="font-medium text-sm">{item.date}</span>
-                  <p className="text-xs text-gray-500">{item.days}</p>
-                </div>
-              </div>
-            ))}
+              ))
+            ) : (
+              <p className="text-gray-500 text-center py-8">No pending approvals</p>
+            )}
           </div>
         </div>
       </div>
@@ -114,18 +180,22 @@ export default function HRMSDashboard() {
         <a href="/hrms/employees" className="p-4 bg-white border border-gray-200 rounded-lg hover:border-blue-500 transition-colors">
           <span className="text-2xl">👤</span>
           <p className="font-medium mt-2">Employees</p>
+          <p className="text-sm text-gray-500">{stats?.totalEmployees || 0} total</p>
         </a>
         <a href="/hrms/attendance" className="p-4 bg-white border border-gray-200 rounded-lg hover:border-blue-500 transition-colors">
           <span className="text-2xl">📅</span>
           <p className="font-medium mt-2">Attendance</p>
+          <p className="text-sm text-gray-500">{stats?.presentToday || 0} present</p>
         </a>
         <a href="/hrms/leave" className="p-4 bg-white border border-gray-200 rounded-lg hover:border-blue-500 transition-colors">
           <span className="text-2xl">🏖️</span>
           <p className="font-medium mt-2">Leave</p>
+          <p className="text-sm text-gray-500">{stats?.onLeave || 0} on leave</p>
         </a>
         <a href="/hrms/payroll" className="p-4 bg-white border border-gray-200 rounded-lg hover:border-blue-500 transition-colors">
           <span className="text-2xl">💵</span>
           <p className="font-medium mt-2">Payroll</p>
+          <p className="text-sm text-gray-500">Process monthly</p>
         </a>
       </div>
 
@@ -133,18 +203,22 @@ export default function HRMSDashboard() {
         <a href="/hrms/claims" className="p-4 bg-white border border-gray-200 rounded-lg hover:border-blue-500 transition-colors">
           <span className="text-2xl">🧾</span>
           <p className="font-medium mt-2">Claims</p>
+          <p className="text-sm text-gray-500">{stats?.pendingClaims || 0} pending</p>
         </a>
         <a href="/hrms/performance" className="p-4 bg-white border border-gray-200 rounded-lg hover:border-blue-500 transition-colors">
           <span className="text-2xl">📈</span>
           <p className="font-medium mt-2">Performance</p>
+          <p className="text-sm text-gray-500">Reviews & goals</p>
         </a>
         <a href="/hrms/training" className="p-4 bg-white border border-gray-200 rounded-lg hover:border-blue-500 transition-colors">
           <span className="text-2xl">🎓</span>
           <p className="font-medium mt-2">Training</p>
+          <p className="text-sm text-gray-500">Courses & enrollment</p>
         </a>
         <a href="/hrms/recruitment" className="p-4 bg-white border border-gray-200 rounded-lg hover:border-blue-500 transition-colors">
           <span className="text-2xl">📝</span>
           <p className="font-medium mt-2">Recruitment</p>
+          <p className="text-sm text-gray-500">{stats?.openPositions || 0} open positions</p>
         </a>
       </div>
     </div>
