@@ -1,43 +1,122 @@
 "use client";
 
-import { useState } from "react";
-import { DataTable } from "../../components/DataTable";
-import { FormModal } from "../../components/FormModal";
+import { useEffect, useState } from "react";
+import { useApi } from "../../contexts/AuthContext";
+import { DataTable } from "../../../components/DataTable";
+import { FormModal } from "../../../components/FormModal";
 
-const leaveData = [
-  { id: "LV-2024-0123", employee: "John Smith", type: "Annual Leave", from: "2024-01-25", to: "2024-01-28", days: 3, status: "Pending" },
-  { id: "LV-2024-0122", employee: "Lisa Wang", type: "Sick Leave", from: "2024-02-01", to: "2024-02-02", days: 2, status: "Approved" },
-  { id: "LV-2024-0121", employee: "Mike Johnson", type: "Personal Leave", from: "2024-01-20", to: "2024-01-20", days: 1, status: "Approved" },
-  { id: "LV-2024-0120", employee: "Sarah Chen", type: "Annual Leave", from: "2024-02-14", to: "2024-02-16", days: 3, status: "Pending" },
-  { id: "LV-2024-0119", employee: "David Lee", type: "Sick Leave", from: "2024-01-15", to: "2024-01-16", days: 2, status: "Rejected" },
-];
+interface LeaveRequest {
+  id: string;
+  leaveType: string;
+  employee: {
+    fullName: string;
+  };
+  startDate: string;
+  endDate: string;
+  numberOfDays: number;
+  status: string;
+}
 
 const statusColors: Record<string, string> = {
-  Pending: "bg-yellow-100 text-yellow-800",
-  Approved: "bg-green-100 text-green-800",
-  Rejected: "bg-red-100 text-red-800",
+  PENDING: "bg-yellow-100 text-yellow-800",
+  APPROVED: "bg-green-100 text-green-800",
+  REJECTED: "bg-red-100 text-red-800",
+  CANCELLED: "bg-gray-100 text-gray-800",
 };
 
 export default function LeavePage() {
+  const { fetchWithAuth } = useApi();
+  const [requests, setRequests] = useState<LeaveRequest[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [stats, setStats] = useState<any>(null);
+
+  useEffect(() => {
+    loadRequests();
+    loadStats();
+  }, []);
+
+  const loadRequests = async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetchWithAuth("/api/leave?limit=50");
+      if (response.ok) {
+        const data = await response.json();
+        setRequests(data.data);
+      }
+    } catch (error) {
+      console.error("Error loading leave requests:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loadStats = async () => {
+    try {
+      const response = await fetchWithAuth("/api/leave/stats/overview");
+      if (response.ok) {
+        const data = await response.json();
+        setStats(data);
+      }
+    } catch (error) {
+      console.error("Error loading stats:", error);
+    }
+  };
+
+  const handleSubmit = async (formData: FormData) => {
+    try {
+      const data = Object.fromEntries(formData.entries());
+      const response = await fetchWithAuth("/api/leave", {
+        method: "POST",
+        body: JSON.stringify({
+          ...data,
+          employeeId: "temp-employee-id", // Would come from auth context
+          numberOfDays: 1, // Calculate from dates
+        }),
+      });
+
+      if (response.ok) {
+        setIsModalOpen(false);
+        loadRequests();
+        loadStats();
+      }
+    } catch (error) {
+      console.error("Error creating leave request:", error);
+    }
+  };
 
   const columns = [
     { key: "id", header: "Leave ID" },
-    { key: "employee", header: "Employee" },
-    { key: "type", header: "Leave Type" },
-    { key: "from", header: "From" },
-    { key: "to", header: "To" },
-    { key: "days", header: "Days" },
+    { 
+      key: "employee", 
+      header: "Employee",
+      render: (item: LeaveRequest) => item.employee?.fullName || "-",
+    },
+    { key: "leaveType", header: "Leave Type" },
+    { 
+      key: "startDate", 
+      header: "From",
+      render: (item: LeaveRequest) => new Date(item.startDate).toLocaleDateString(),
+    },
+    { 
+      key: "endDate", 
+      header: "To",
+      render: (item: LeaveRequest) => new Date(item.endDate).toLocaleDateString(),
+    },
+    { key: "numberOfDays", header: "Days" },
     {
       key: "status",
       header: "Status",
-      render: (item: typeof leaveData[0]) => (
-        <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[item.status]}`}>
+      render: (item: LeaveRequest) => (
+        <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[item.status] || "bg-gray-100 text-gray-800"}`}>
           {item.status}
         </span>
       ),
     },
   ];
+
+  const pendingCount = stats?.requestsByStatus?.find((s: any) => s.status === "PENDING")?._count?.status || 0;
+  const approvedCount = stats?.requestsByStatus?.find((s: any) => s.status === "APPROVED")?._count?.status || 0;
 
   return (
     <div>
@@ -62,19 +141,19 @@ export default function LeavePage() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-blue-50 p-4 rounded-lg">
           <p className="text-sm text-gray-600">Pending Requests</p>
-          <p className="text-2xl font-bold">12</p>
+          <p className="text-2xl font-bold">{stats?.pendingRequests || 0}</p>
         </div>
         <div className="bg-green-50 p-4 rounded-lg">
           <p className="text-sm text-gray-600">Approved (This Month)</p>
-          <p className="text-2xl font-bold">28</p>
+          <p className="text-2xl font-bold">{approvedCount}</p>
         </div>
         <div className="bg-yellow-50 p-4 rounded-lg">
           <p className="text-sm text-gray-600">Currently On Leave</p>
-          <p className="text-2xl font-bold">24</p>
+          <p className="text-2xl font-bold">-</p>
         </div>
         <div className="bg-purple-50 p-4 rounded-lg">
-          <p className="text-sm text-gray-600">Avg Leave Balance</p>
-          <p className="text-2xl font-bold">18 days</p>
+          <p className="text-sm text-gray-600">Total Requests</p>
+          <p className="text-2xl font-bold">{stats?.totalRequests || 0}</p>
         </div>
       </div>
 
@@ -87,38 +166,44 @@ export default function LeavePage() {
         <span className="absolute left-3 top-2.5 text-gray-400">🔍</span>
       </div>
 
-      <DataTable columns={columns} data={leaveData} />
+      {isLoading ? (
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        </div>
+      ) : (
+        <DataTable columns={columns} data={requests} />
+      )}
 
       <FormModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         title="Apply for Leave"
-        onSubmit={() => setIsModalOpen(false)}
+        onSubmit={handleSubmit}
       >
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium mb-1">Leave Type</label>
-            <select className="w-full px-3 py-2 border border-gray-300 rounded-lg">
-              <option>Annual Leave</option>
-              <option>Sick Leave</option>
-              <option>Personal Leave</option>
-              <option>Maternity/Paternity Leave</option>
-              <option>Unpaid Leave</option>
+            <select name="leaveType" className="w-full px-3 py-2 border border-gray-300 rounded-lg">
+              <option value="ANNUAL">Annual Leave</option>
+              <option value="MEDICAL">Sick Leave</option>
+              <option value="UNPAID">Unpaid Leave</option>
+              <option value="MATERNITY">Maternity Leave</option>
+              <option value="PATERNITY">Paternity Leave</option>
             </select>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Start Date</label>
-              <input type="date" className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+              <input name="startDate" type="date" className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">End Date</label>
-              <input type="date" className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+              <input name="endDate" type="date" className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
             </div>
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Reason</label>
-            <textarea className="w-full px-3 py-2 border border-gray-300 rounded-lg" rows={3} />
+            <textarea name="reason" className="w-full px-3 py-2 border border-gray-300 rounded-lg" rows={3} />
           </div>
         </div>
       </FormModal>

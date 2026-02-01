@@ -17,6 +17,11 @@ import attendanceRoutes from './routes/attendance';
 import leaveRoutes from './routes/leave';
 import payrollRoutes from './routes/payroll';
 import claimsRoutes from './routes/claims';
+import performanceRoutes from './routes/performance';
+import trainingRoutes from './routes/training';
+import recruitmentRoutes from './routes/recruitment';
+import authRoutes from './routes/auth';
+import dashboardRoutes from './routes/dashboard';
 
 dotenv.config();
 
@@ -48,8 +53,13 @@ app.use('/api/attendance', attendanceRoutes);
 app.use('/api/leave', leaveRoutes);
 app.use('/api/payroll', payrollRoutes);
 app.use('/api/claims', claimsRoutes);
+app.use('/api/performance', performanceRoutes);
+app.use('/api/training', trainingRoutes);
+app.use('/api/recruitment', recruitmentRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
-// Dashboard data endpoint
+// Dashboard data endpoint (legacy - kept for compatibility)
 app.get('/api/dashboard', async (req, res) => {
   try {
     const { prisma } = await import('@repo/database');

@@ -1,39 +1,127 @@
-import { DataTable } from "../../components/DataTable";
+"use client";
 
-const attendanceData = [
-  { id: "EMP-001", name: "John Smith", date: "2024-01-19", checkIn: "08:55", checkOut: "17:30", status: "Present", hours: "8.5" },
-  { id: "EMP-002", name: "Sarah Chen", date: "2024-01-19", checkIn: "08:45", checkOut: "17:45", status: "Present", hours: "9.0" },
-  { id: "EMP-003", name: "Mike Johnson", date: "2024-01-19", checkIn: "09:05", checkOut: "18:00", status: "Present", hours: "8.9" },
-  { id: "EMP-004", name: "Lisa Wang", date: "2024-01-19", checkIn: "08:30", checkOut: "17:15", status: "Present", hours: "8.8" },
-  { id: "EMP-005", name: "David Lee", date: "2024-01-19", checkIn: "-", checkOut: "-", status: "Absent", hours: "0" },
-  { id: "EMP-006", name: "Emma Wilson", date: "2024-01-19", checkIn: "-", checkOut: "-", status: "On Leave", hours: "0" },
-];
+import { useEffect, useState } from "react";
+import { useApi } from "../../contexts/AuthContext";
+import { DataTable } from "../../../components/DataTable";
+
+interface AttendanceRecord {
+  id: string;
+  employee: {
+    employeeNumber: string;
+    fullName: string;
+  };
+  attendanceDate: string;
+  clockInAt: string | null;
+  clockOutAt: string | null;
+  workedHours: number | null;
+  status: string;
+  isLate: boolean;
+}
+
+interface Stats {
+  totalRecords: number;
+  lateCount: number;
+  todayAttendance: number;
+}
 
 const statusColors: Record<string, string> = {
-  Present: "bg-green-100 text-green-800",
-  Absent: "bg-red-100 text-red-800",
-  "On Leave": "bg-yellow-100 text-yellow-800",
-  Late: "bg-orange-100 text-orange-800",
+  PRESENT: "bg-green-100 text-green-800",
+  ABSENT: "bg-red-100 text-red-800",
+  ON_LEAVE: "bg-yellow-100 text-yellow-800",
+  REST_DAY: "bg-gray-100 text-gray-800",
+  HOLIDAY: "bg-blue-100 text-blue-800",
 };
 
 export default function AttendancePage() {
+  const { fetchWithAuth } = useApi();
+  const [records, setRecords] = useState<AttendanceRecord[]>([]);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split("T")[0]);
+
+  useEffect(() => {
+    loadAttendance();
+    loadStats();
+  }, [selectedDate]);
+
+  const loadAttendance = async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetchWithAuth(`/api/attendance?limit=50&startDate=${selectedDate}&endDate=${selectedDate}`);
+      if (response.ok) {
+        const data = await response.json();
+        setRecords(data.data);
+      }
+    } catch (error) {
+      console.error("Error loading attendance:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loadStats = async () => {
+    try {
+      const response = await fetchWithAuth("/api/attendance/stats/overview");
+      if (response.ok) {
+        const data = await response.json();
+        setStats(data);
+      }
+    } catch (error) {
+      console.error("Error loading stats:", error);
+    }
+  };
+
+  const formatTime = (dateStr: string | null) => {
+    if (!dateStr) return "-";
+    return new Date(dateStr).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
+
   const columns = [
-    { key: "id", header: "Employee ID" },
-    { key: "name", header: "Name" },
-    { key: "date", header: "Date" },
-    { key: "checkIn", header: "Check In" },
-    { key: "checkOut", header: "Check Out" },
-    { key: "hours", header: "Hours" },
+    { 
+      key: "employeeNumber", 
+      header: "Employee ID",
+      render: (item: AttendanceRecord) => item.employee?.employeeNumber || "-",
+    },
+    { 
+      key: "name", 
+      header: "Name",
+      render: (item: AttendanceRecord) => item.employee?.fullName || "-",
+    },
+    { 
+      key: "attendanceDate", 
+      header: "Date",
+      render: (item: AttendanceRecord) => new Date(item.attendanceDate).toLocaleDateString(),
+    },
+    { 
+      key: "clockInAt", 
+      header: "Check In",
+      render: (item: AttendanceRecord) => formatTime(item.clockInAt),
+    },
+    { 
+      key: "clockOutAt", 
+      header: "Check Out",
+      render: (item: AttendanceRecord) => formatTime(item.clockOutAt),
+    },
+    { 
+      key: "workedHours", 
+      header: "Hours",
+      render: (item: AttendanceRecord) => item.workedHours?.toFixed(1) || "-",
+    },
     {
       key: "status",
       header: "Status",
-      render: (item: typeof attendanceData[0]) => (
-        <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[item.status]}`}>
+      render: (item: AttendanceRecord) => (
+        <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[item.status] || "bg-gray-100 text-gray-800"}`}>
           {item.status}
         </span>
       ),
     },
   ];
+
+  const presentCount = records.filter(r => r.status === "PRESENT").length;
+  const onLeaveCount = records.filter(r => r.status === "ON_LEAVE").length;
+  const absentCount = records.filter(r => r.status === "ABSENT").length;
+  const lateCount = records.filter(r => r.isLate).length;
 
   return (
     <div>
@@ -54,20 +142,20 @@ export default function AttendancePage() {
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-green-50 p-4 rounded-lg">
-          <p className="text-sm text-gray-600">Present Today</p>
-          <p className="text-2xl font-bold">318</p>
+          <p className="text-sm text-gray-600">Present</p>
+          <p className="text-2xl font-bold">{presentCount}</p>
         </div>
         <div className="bg-red-50 p-4 rounded-lg">
           <p className="text-sm text-gray-600">Absent</p>
-          <p className="text-2xl font-bold">4</p>
+          <p className="text-2xl font-bold">{absentCount}</p>
         </div>
         <div className="bg-yellow-50 p-4 rounded-lg">
           <p className="text-sm text-gray-600">On Leave</p>
-          <p className="text-2xl font-bold">24</p>
+          <p className="text-2xl font-bold">{onLeaveCount}</p>
         </div>
-        <div className="bg-blue-50 p-4 rounded-lg">
+        <div className="bg-orange-50 p-4 rounded-lg">
           <p className="text-sm text-gray-600">Late Arrivals</p>
-          <p className="text-2xl font-bold">8</p>
+          <p className="text-2xl font-bold">{lateCount}</p>
         </div>
       </div>
 
@@ -80,10 +168,21 @@ export default function AttendancePage() {
           />
           <span className="absolute left-3 top-2.5 text-gray-400">🔍</span>
         </div>
-        <input type="date" className="px-4 py-2 border border-gray-300 rounded-lg" defaultValue="2024-01-19" />
+        <input 
+          type="date" 
+          className="px-4 py-2 border border-gray-300 rounded-lg" 
+          value={selectedDate}
+          onChange={(e) => setSelectedDate(e.target.value)}
+        />
       </div>
 
-      <DataTable columns={columns} data={attendanceData} />
+      {isLoading ? (
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        </div>
+      ) : (
+        <DataTable columns={columns} data={records} />
+      )}
     </div>
   );
 }
