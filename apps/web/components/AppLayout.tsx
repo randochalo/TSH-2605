@@ -3,7 +3,19 @@
 import { useAuth } from "../app/contexts/AuthContext";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
+import { ToastProvider } from "./toast";
+import { MobileNav, MobilePageWrapper } from "./mobile-nav";
+import { DemoBadge, DemoWatermark, KeyboardShortcuts } from "./demo-mode";
 import { usePathname } from "next/navigation";
+import { PageTransition } from "./animations";
+
+const keyboardShortcuts = [
+  { key: "Ctrl + K", action: "Quick search" },
+  { key: "Ctrl + N", action: "Create new item" },
+  { key: "Ctrl + R", action: "Refresh data" },
+  { key: "Ctrl + /", action: "Show shortcuts" },
+  { key: "Esc", action: "Close modal / Go back" },
+];
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -44,14 +56,34 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen bg-gray-50">
-      <Sidebar />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <Header />
-        <main className="flex-1 overflow-y-auto p-6">
-          {children}
-        </main>
+    <ToastProvider>
+      <div className="flex h-screen bg-gray-50">
+        {/* Demo Mode Indicators */}
+        <DemoBadge />
+        <DemoWatermark />
+        
+        {/* Mobile Navigation */}
+        <MobileNav />
+        
+        {/* Desktop Sidebar */}
+        <div className="hidden lg:block">
+          <Sidebar />
+        </div>
+        
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <Header />
+          <MobilePageWrapper>
+            <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+              <PageTransition>
+                {children}
+              </PageTransition>
+            </main>
+          </MobilePageWrapper>
+        </div>
+        
+        {/* Keyboard Shortcuts */}
+        <KeyboardShortcuts shortcuts={keyboardShortcuts} />
       </div>
-    </div>
+    </ToastProvider>
   );
 }
