@@ -1,0 +1,1800 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// SHARED TABLES
+// ============================================
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  password      String
+  firstName     String
+  lastName      String
+  role          UserRole  @default(USER)
+  status        UserStatus @default(ACTIVE)
+  branchId      String?
+  department    String?
+  employeeId    String?   @unique
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relations
+  branch        Branch?   @relation(fields: [branchId], references: [id])
+  auditLogs     AuditLog[]
+  
+  @@map("users")
+}
+
+model Branch {
+  id            String    @id @default(uuid())
+  code          String    @unique
+  name          String
+  address       String?
+  city          String?
+  state         String?
+  postalCode    String?
+  country       String    @default("Malaysia")
+  phone         String?
+  email         String?
+  managerId     String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relations
+  users         User[]
+  assets        Asset[]
+  employees     Employee[]
+  
+  @@map("branches")
+}
+
+model AuditLog {
+  id            String    @id @default(uuid())
+  userId        String?
+  action        String
+  entityType    String
+  entityId      String
+  oldValues     Json?
+  newValues     Json?
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime  @default(now())
+  
+  // Relations
+  user          User?     @relation(fields: [userId], references: [id])
+  
+  @@map("audit_logs")
+}
+
+// ============================================
+// EMS TABLES - Equipment Management System
+// ============================================
+
+model Asset {
+  id                  String          @id @default(uuid())
+  assetNumber         String          @unique
+  name                String
+  description         String?
+  categoryId          String
+  locationId          String?
+  branchId            String?
+  status              AssetStatus     @default(ACTIVE)
+  condition           AssetCondition  @default(GOOD)
+  acquisitionDate     DateTime?
+  acquisitionCost     Decimal?        @db.Decimal(12, 2)
+  currentValue        Decimal?        @db.Decimal(12, 2)
+  salvageValue        Decimal?        @db.Decimal(12, 2)
+  usefulLifeYears     Int?
+  depreciationMethod  DepreciationMethod @default(STRAIGHT_LINE)
+  serialNumber        String?
+  manufacturer        String?
+  model               String?
+  yearOfManufacture   Int?
+  qrCode              String?
+  barcode             String?
+  rfidTag             String?
+  assignedToId        String?
+  assignedDate        DateTime?
+  expectedLife        Int?            // in months
+  warrantyExpiryDate  DateTime?
+  insurancePolicy     String?
+  notes               String?
+  customFields        Json?
+  isActive            Boolean         @default(true)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  
+  // Relations
+  category            AssetCategory   @relation(fields: [categoryId], references: [id])
+  location            AssetLocation?  @relation(fields: [locationId], references: [id])
+  branch              Branch?         @relation(fields: [branchId], references: [id])
+  maintenanceRecords  MaintenanceRecord[]
+  repairOrders        RepairOrder[]
+  depreciationEntries DepreciationEntry[]
+  warranties          Warranty[]
+  sparePartTransactions SparePartTransaction[]
+  
+  @@map("assets")
+}
+
+model AssetCategory {
+  id            String    @id @default(uuid())
+  code          String    @unique
+  name          String
+  description   String?
+  parentId      String?
+  depreciationRate Decimal?  @db.Decimal(5, 2)
+  expectedLife  Int?      // in months
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relations
+  parent        AssetCategory? @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children      AssetCategory[] @relation("CategoryHierarchy")
+  assets        Asset[]
+  
+  @@map("asset_categories")
+}
+
+model AssetLocation {
+  id            String    @id @default(uuid())
+  code          String    @unique
+  name          String
+  description   String?
+  parentId      String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relations
+  parent        AssetLocation? @relation("LocationHierarchy", fields: [parentId], references: [id])
+  children      AssetLocation[] @relation("LocationHierarchy")
+  assets        Asset[]
+  
+  @@map("asset_locations")
+}
+
+model MaintenanceSchedule {
+  id                String              @id @default(uuid())
+  assetId           String?
+  categoryId        String?
+  title             String
+  description       String?
+  scheduleType      ScheduleType        @default(TIME_BASED)
+  frequencyMonths   Int?
+  frequencyHours    Int?
+  frequencyKm       Int?
+  lastPerformedAt   DateTime?
+  nextDueAt         DateTime
+  estimatedDuration Int?                // in minutes
+  estimatedCost     Decimal?            @db.Decimal(12, 2)
+  priority          MaintenancePriority @default(MEDIUM)
+  checklistItems    Json?               // Array of checklist items
+  isActive          Boolean             @default(true)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  
+  // Relations
+  maintenanceRecords MaintenanceRecord[]
+  
+  @@map("maintenance_schedules")
+}
+
+model MaintenanceRecord {
+  id                  String            @id @default(uuid())
+  scheduleId          String?
+  assetId             String
+  title               String
+  description         String?
+  workOrderNumber     String            @unique
+  status              WorkOrderStatus   @default(PENDING)
+  priority            MaintenancePriority @default(MEDIUM)
+  scheduledStartAt    DateTime?
+  scheduledEndAt      DateTime?
+  actualStartAt       DateTime?
+  actualEndAt         DateTime?
+  completedAt         DateTime?
+  technicianId        String?
+  technicianNotes     String?
+  checklistCompleted  Json?
+  laborHours          Decimal?          @db.Decimal(6, 2)
+  laborCost           Decimal?          @db.Decimal(12, 2)
+  partsCost           Decimal?          @db.Decimal(12, 2)
+  otherCost           Decimal?          @db.Decimal(12, 2)
+  totalCost           Decimal?          @db.Decimal(12, 2)
+  meterReading        Int?
+  nextServiceDueAt    DateTime?
+  nextServiceDueKm    Int?
+  photos              Json?
+  documents           Json?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  
+  // Relations
+  schedule            MaintenanceSchedule? @relation(fields: [scheduleId], references: [id])
+  asset               Asset             @relation(fields: [assetId], references: [id])
+  repairParts         RepairPart[]
+  
+  @@map("maintenance_records")
+}
+
+model RepairOrder {
+  id                String          @id @default(uuid())
+  orderNumber       String          @unique
+  assetId           String
+  title             String
+  description       String?
+  symptom           String?
+  diagnosis         String?
+  resolution        String?
+  status            RepairStatus    @default(OPEN)
+  priority          Priority        @default(MEDIUM)
+  reportedBy        String
+  reportedAt        DateTime        @default(now())
+  assignedToId      String?
+  assignedAt        DateTime?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  laborHours        Decimal?        @db.Decimal(6, 2)
+  laborCost         Decimal?        @db.Decimal(12, 2)
+  partsCost         Decimal?        @db.Decimal(12, 2)
+  otherCost         Decimal?        @db.Decimal(12, 2)
+  totalCost         Decimal?        @db.Decimal(12, 2)
+  isWarrantyClaim   Boolean         @default(false)
+  warrantyClaimId   String?
+  externalVendorId  String?
+  externalVendorCost Decimal?       @db.Decimal(12, 2)
+  photos            Json?
+  documents         Json?
+  notes             String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  asset             Asset           @relation(fields: [assetId], references: [id])
+  repairParts       RepairPart[]
+  
+  @@map("repair_orders")
+}
+
+model RepairPart {
+  id                String          @id @default(uuid())
+  maintenanceRecordId String?
+  repairOrderId     String?
+  sparePartId       String?
+  partNumber        String
+  partName          String
+  description       String?
+  quantity          Decimal         @db.Decimal(10, 2)
+  unitCost          Decimal         @db.Decimal(12, 2)
+  totalCost         Decimal         @db.Decimal(12, 2)
+  isWarranty        Boolean         @default(false)
+  supplierId        String?
+  createdAt         DateTime        @default(now())
+  
+  // Relations
+  maintenanceRecord MaintenanceRecord? @relation(fields: [maintenanceRecordId], references: [id])
+  repairOrder       RepairOrder?    @relation(fields: [repairOrderId], references: [id])
+  sparePart         SparePart?      @relation(fields: [sparePartId], references: [id])
+  
+  @@map("repair_parts")
+}
+
+model DepreciationEntry {
+  id                String          @id @default(uuid())
+  assetId           String
+  periodYear        Int
+  periodMonth       Int
+  method            DepreciationMethod
+  openingValue      Decimal         @db.Decimal(12, 2)
+  depreciationAmount Decimal        @db.Decimal(12, 2)
+  accumulatedDepreciation Decimal   @db.Decimal(12, 2)
+  closingValue      Decimal         @db.Decimal(12, 2)
+  postedToGl        Boolean         @default(false)
+  glEntryId         String?
+  createdAt         DateTime        @default(now())
+  
+  // Relations
+  asset             Asset           @relation(fields: [assetId], references: [id])
+  
+  @@unique([assetId, periodYear, periodMonth])
+  @@map("depreciation_entries")
+}
+
+model Warranty {
+  id                String          @id @default(uuid())
+  assetId           String
+  warrantyNumber    String?
+  warrantyType      WarrantyType    @default(MANUFACTURER)
+  provider          String
+  providerContact   String?
+  startDate         DateTime
+  endDate           DateTime
+  terms             String?
+  coverage          String?
+  exclusions        String?
+  claimProcess      String?
+  isExtended        Boolean         @default(false)
+  originalWarrantyId String?
+  cost              Decimal?        @db.Decimal(12, 2)
+  isActive          Boolean         @default(true)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  asset             Asset           @relation(fields: [assetId], references: [id])
+  claims            WarrantyClaim[]
+  
+  @@map("warranties")
+}
+
+model WarrantyClaim {
+  id                String          @id @default(uuid())
+  warrantyId        String
+  claimNumber       String          @unique
+  claimDate         DateTime        @default(now())
+  description       String
+  damageCause       String?
+  repairRequired    String?
+  estimatedCost     Decimal?        @db.Decimal(12, 2)
+  actualCost        Decimal?        @db.Decimal(12, 2)
+  status            ClaimStatus     @default(SUBMITTED)
+  submittedBy       String
+  submittedAt       DateTime        @default(now())
+  approvedBy        String?
+  approvedAt        DateTime?
+  reimbursedAmount  Decimal?        @db.Decimal(12, 2)
+  reimbursedAt      DateTime?
+  notes             String?
+  documents         Json?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  warranty          Warranty        @relation(fields: [warrantyId], references: [id])
+  
+  @@map("warranty_claims")
+}
+
+model SparePart {
+  id                String          @id @default(uuid())
+  partNumber        String          @unique
+  name              String
+  description       String?
+  category          String?
+  manufacturer      String?
+  model             String?
+  unitOfMeasure     String          @default("pcs")
+  reorderPoint      Decimal         @default(10) @db.Decimal(10, 2)
+  reorderQuantity   Decimal         @default(50) @db.Decimal(10, 2)
+  standardCost      Decimal?        @db.Decimal(12, 2)
+  averageCost       Decimal?        @db.Decimal(12, 2)
+  lastPurchaseCost  Decimal?        @db.Decimal(12, 2)
+  abcClassification AbcClass        @default(C)
+  isActive          Boolean         @default(true)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  inventory         SparePartInventory[]
+  transactions      SparePartTransaction[]
+  repairParts       RepairPart[]
+  
+  @@map("spare_parts")
+}
+
+model SparePartInventory {
+  id                String          @id @default(uuid())
+  sparePartId       String
+  locationId        String?
+  branchId          String?
+  quantityOnHand    Decimal         @default(0) @db.Decimal(10, 2)
+  quantityReserved  Decimal         @default(0) @db.Decimal(10, 2)
+  quantityAvailable Decimal         @default(0) @db.Decimal(10, 2)
+  lastMovementAt    DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  sparePart         SparePart       @relation(fields: [sparePartId], references: [id])
+  
+  @@unique([sparePartId, locationId, branchId])
+  @@map("spare_part_inventory")
+}
+
+model SparePartTransaction {
+  id                String          @id @default(uuid())
+  sparePartId       String
+  assetId           String?
+  transactionType   TransactionType
+  quantity          Decimal         @db.Decimal(10, 2)
+  unitCost          Decimal?        @db.Decimal(12, 2)
+  totalCost         Decimal?        @db.Decimal(12, 2)
+  referenceType     String?         // REPAIR_ORDER, MAINTENANCE, ADJUSTMENT, etc
+  referenceId       String?
+  notes             String?
+  performedBy       String
+  performedAt       DateTime        @default(now())
+  createdAt         DateTime        @default(now())
+  
+  // Relations
+  sparePart         SparePart       @relation(fields: [sparePartId], references: [id])
+  asset             Asset?          @relation(fields: [assetId], references: [id])
+  
+  @@map("spare_part_transactions")
+}
+
+// ============================================
+// PS TABLES - Procurement System
+// ============================================
+
+model PurchaseRequisition {
+  id                String          @id @default(uuid())
+  prNumber          String          @unique
+  title             String
+  description       String?
+  requestorId       String
+  requestorName     String
+  department        String
+  branchId          String?
+  priority          Priority        @default(MEDIUM)
+  status            PRStatus        @default(DRAFT)
+  requiredDate      DateTime?
+  currency          String          @default("MYR")
+  totalAmount       Decimal         @default(0) @db.Decimal(12, 2)
+  budgetId          String?
+  rejectionReason   String?
+  submittedAt       DateTime?
+  approvedAt        DateTime?
+  convertedToPoAt   DateTime?
+  notes             String?
+  attachments       Json?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  lines             PRLine[]
+  approvals         PRApproval[]
+  quotations        Quotation[]
+  purchaseOrders    PurchaseOrder[]
+  
+  @@map("purchase_requisitions")
+}
+
+model PRLine {
+  id                String          @id @default(uuid())
+  prId              String
+  lineNumber        Int
+  itemDescription   String
+  specification     String?
+  quantity          Decimal         @db.Decimal(10, 2)
+  unitOfMeasure     String
+  estimatedUnitPrice Decimal?       @db.Decimal(12, 2)
+  estimatedTotal    Decimal?        @db.Decimal(12, 2)
+  requiredDate      DateTime?
+  category          String?
+  accountCode       String?
+  costCenter        String?
+  projectCode       String?
+  notes             String?
+  createdAt         DateTime        @default(now())
+  
+  // Relations
+  pr                PurchaseRequisition @relation(fields: [prId], references: [id], onDelete: Cascade)
+  
+  @@map("pr_lines")
+}
+
+model PRApproval {
+  id                String          @id @default(uuid())
+  prId              String
+  approverLevel     Int
+  approverId        String?
+  approverName      String?
+  approverRole      String?
+  action            ApprovalAction?
+  actionAt          DateTime?
+  comments          String?
+  isCurrent         Boolean         @default(false)
+  createdAt         DateTime        @default(now())
+  
+  // Relations
+  pr                PurchaseRequisition @relation(fields: [prId], references: [id], onDelete: Cascade)
+  
+  @@map("pr_approvals")
+}
+
+model Vendor {
+  id                String          @id @default(uuid())
+  vendorCode        String          @unique
+  companyName       String
+  registrationNumber String?
+  taxNumber         String?
+  businessType      String?
+  category          String?
+  status            VendorStatus    @default(PENDING)
+  creditLimit       Decimal?        @db.Decimal(12, 2)
+  paymentTerms      String?         // Net 30, Net 60, etc
+  currency          String          @default("MYR")
+  
+  // Contact Info
+  contactName       String?
+  contactEmail      String?
+  contactPhone      String?
+  website           String?
+  
+  // Address
+  address           String?
+  city              String?
+  state             String?
+  postalCode        String?
+  country           String          @default("Malaysia")
+  
+  // Bank Info
+  bankName          String?
+  bankAccountName   String?
+  bankAccountNumber String?
+  bankSwiftCode     String?
+  
+  // Evaluation
+  rating            Decimal?        @db.Decimal(3, 2)
+  evaluationScore   Decimal?        @db.Decimal(5, 2)
+  lastEvaluatedAt   DateTime?
+  
+  isActive          Boolean         @default(true)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  evaluations       VendorEvaluation[]
+  quotations        Quotation[]
+  purchaseOrders    PurchaseOrder[]
+  goodsReceipts     GoodsReceipt[]
+  invoices          Invoice[]
+  
+  @@map("vendors")
+}
+
+model VendorEvaluation {
+  id                String          @id @default(uuid())
+  vendorId          String
+  evaluationPeriod  String          // YYYY-MM
+  evaluatedBy       String
+  evaluatedAt       DateTime        @default(now())
+  
+  // Criteria
+  qualityScore      Decimal         @db.Decimal(4, 2)
+  deliveryScore     Decimal         @db.Decimal(4, 2)
+  priceScore        Decimal         @db.Decimal(4, 2)
+  serviceScore      Decimal         @db.Decimal(4, 2)
+  overallScore      Decimal         @db.Decimal(4, 2)
+  
+  comments          String?
+  recommendations   String?
+  isActive          Boolean         @default(true)
+  createdAt         DateTime        @default(now())
+  
+  // Relations
+  vendor            Vendor          @relation(fields: [vendorId], references: [id])
+  
+  @@map("vendor_evaluations")
+}
+
+model Quotation {
+  id                String          @id @default(uuid())
+  quotationNumber   String          @unique
+  prId              String?
+  vendorId          String
+  vendorName        String
+  quotationDate     DateTime
+  validUntil        DateTime?
+  currency          String          @default("MYR")
+  subtotal          Decimal         @db.Decimal(12, 2)
+  taxAmount         Decimal         @default(0) @db.Decimal(12, 2)
+  totalAmount       Decimal         @db.Decimal(12, 2)
+  deliveryTerms     String?
+  paymentTerms      String?
+  warrantyTerms     String?
+  leadTimeDays      Int?
+  status            QuotationStatus @default(RECEIVED)
+  isSelected        Boolean         @default(false)
+  selectionReason   String?
+  submittedBy       String?
+  submittedAt       DateTime?
+  notes             String?
+  attachments       Json?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  pr                PurchaseRequisition? @relation(fields: [prId], references: [id])
+  vendor            Vendor          @relation(fields: [vendorId], references: [id])
+  lines             QuotationLine[]
+  
+  @@map("quotations")
+}
+
+model QuotationLine {
+  id                String          @id @default(uuid())
+  quotationId       String
+  lineNumber        Int
+  description       String
+  specification     String?
+  quantity          Decimal         @db.Decimal(10, 2)
+  unitOfMeasure     String
+  unitPrice         Decimal         @db.Decimal(12, 2)
+  totalPrice        Decimal         @db.Decimal(12, 2)
+  discountPercent   Decimal         @default(0) @db.Decimal(5, 2)
+  deliveryDate      DateTime?
+  notes             String?
+  createdAt         DateTime        @default(now())
+  
+  // Relations
+  quotation         Quotation       @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  
+  @@map("quotation_lines")
+}
+
+model PurchaseOrder {
+  id                String          @id @default(uuid())
+  poNumber          String          @unique
+  prId              String?
+  vendorId          String
+  vendorName        String
+  quotationId       String?
+  orderDate         DateTime        @default(now())
+  deliveryDate      DateTime?
+  currency          String          @default("MYR")
+  subtotal          Decimal         @db.Decimal(12, 2)
+  taxAmount         Decimal         @default(0) @db.Decimal(12, 2)
+  totalAmount       Decimal         @db.Decimal(12, 2)
+  deliveryAddress   String?
+  deliveryTerms     String?
+  paymentTerms      String?
+  status            POStatus        @default(DRAFT)
+  revision          Int             @default(1)
+  approvedBy        String?
+  approvedAt        DateTime?
+  notes             String?
+  attachments       Json?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  pr                PurchaseRequisition? @relation(fields: [prId], references: [id])
+  vendor            Vendor          @relation(fields: [vendorId], references: [id])
+  lines             POLine[]
+  goodsReceipts     GoodsReceipt[]
+  invoices          Invoice[]
+  
+  @@map("purchase_orders")
+}
+
+model POLine {
+  id                String          @id @default(uuid())
+  poId              String
+  lineNumber        Int
+  description       String
+  specification     String?
+  quantity          Decimal         @db.Decimal(10, 2)
+  quantityReceived  Decimal         @default(0) @db.Decimal(10, 2)
+  quantityInvoiced  Decimal         @default(0) @db.Decimal(10, 2)
+  unitOfMeasure     String
+  unitPrice         Decimal         @db.Decimal(12, 2)
+  totalPrice        Decimal         @db.Decimal(12, 2)
+  discountPercent   Decimal         @default(0) @db.Decimal(5, 2)
+  expectedDeliveryDate DateTime?
+  accountCode       String?
+  costCenter        String?
+  projectCode       String?
+  notes             String?
+  createdAt         DateTime        @default(now())
+  
+  // Relations
+  po                PurchaseOrder   @relation(fields: [poId], references: [id], onDelete: Cascade)
+  
+  @@map("po_lines")
+}
+
+model GoodsReceipt {
+  id                String          @id @default(uuid())
+  grnNumber         String          @unique
+  poId              String
+  vendorId          String
+  receiptDate       DateTime        @default(now())
+  deliveryNoteNumber String?
+  carrierName       String?
+  trackingNumber    String?
+  receivedBy        String
+  inspectedBy       String?
+  inspectionResult  InspectionResult @default(PENDING)
+  notes             String?
+  attachments       Json?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  po                PurchaseOrder   @relation(fields: [poId], references: [id])
+  vendor            Vendor          @relation(fields: [vendorId], references: [id])
+  lines             GRNLine[]
+  invoiceMatches    InvoiceLine[]
+  
+  @@map("goods_receipts")
+}
+
+model GRNLine {
+  id                String          @id @default(uuid())
+  grnId             String
+  poLineId          String?
+  lineNumber        Int
+  description       String
+  quantityReceived  Decimal         @db.Decimal(10, 2)
+  quantityAccepted  Decimal         @default(0) @db.Decimal(10, 2)
+  quantityRejected  Decimal         @default(0) @db.Decimal(10, 2)
+  unitOfMeasure     String
+  batchNumber       String?
+  expiryDate        DateTime?
+  condition         String?
+  rejectionReason   String?
+  notes             String?
+  createdAt         DateTime        @default(now())
+  
+  // Relations
+  grn               GoodsReceipt    @relation(fields: [grnId], references: [id], onDelete: Cascade)
+  
+  @@map("grn_lines")
+}
+
+model Invoice {
+  id                String          @id @default(uuid())
+  invoiceNumber     String
+  poId              String?
+  vendorId          String
+  grnId             String?
+  invoiceDate       DateTime
+  dueDate           DateTime?
+  currency          String          @default("MYR")
+  subtotal          Decimal         @db.Decimal(12, 2)
+  taxAmount         Decimal         @default(0) @db.Decimal(12, 2)
+  totalAmount       Decimal         @db.Decimal(12, 2)
+  amountPaid        Decimal         @default(0) @db.Decimal(12, 2)
+  balanceDue        Decimal         @default(0) @db.Decimal(12, 2)
+  status            InvoiceStatus   @default(PENDING)
+  matchingStatus    MatchingStatus  @default(UNMATCHED)
+  
+  // 3-way matching
+  poAmount          Decimal?        @db.Decimal(12, 2)
+  grnAmount         Decimal?        @db.Decimal(12, 2)
+  variance          Decimal?        @db.Decimal(12, 2)
+  variancePercent   Decimal?        @db.Decimal(5, 2)
+  tolerancePercent  Decimal         @default(5) @db.Decimal(5, 2)
+  
+  approvedBy        String?
+  approvedAt        DateTime?
+  paidAt            DateTime?
+  notes             String?
+  attachments       Json?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  po                PurchaseOrder?  @relation(fields: [poId], references: [id])
+  vendor            Vendor          @relation(fields: [vendorId], references: [id])
+  grn               GoodsReceipt?   @relation(fields: [grnId], references: [id])
+  lines             InvoiceLine[]
+  
+  @@unique([invoiceNumber, vendorId])
+  @@map("invoices")
+}
+
+model InvoiceLine {
+  id                String          @id @default(uuid())
+  invoiceId         String
+  poLineId          String?
+  grnLineId         String?
+  lineNumber        Int
+  description       String
+  quantity          Decimal         @db.Decimal(10, 2)
+  unitOfMeasure     String
+  unitPrice         Decimal         @db.Decimal(12, 2)
+  totalPrice        Decimal         @db.Decimal(12, 2)
+  accountCode       String?
+  costCenter        String?
+  notes             String?
+  createdAt         DateTime        @default(now())
+  
+  // Relations
+  invoice           Invoice         @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  
+  @@map("invoice_lines")
+}
+
+model Budget {
+  id                String          @id @default(uuid())
+  budgetNumber      String          @unique
+  name              String
+  description       String?
+  fiscalYear        Int
+  department        String?
+  branchId          String?
+  category          String?
+  currency          String          @default("MYR")
+  totalBudget       Decimal         @db.Decimal(12, 2)
+  
+  // Tracking
+  committedAmount   Decimal         @default(0) @db.Decimal(12, 2)
+  spentAmount       Decimal         @default(0) @db.Decimal(12, 2)
+  availableAmount   Decimal         @default(0) @db.Decimal(12, 2)
+  
+  status            BudgetStatus    @default(ACTIVE)
+  startDate         DateTime
+  endDate           DateTime
+  approvedBy        String?
+  approvedAt        DateTime?
+  notes             String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  allocations       BudgetAllocation[]
+  
+  @@map("budgets")
+}
+
+model BudgetAllocation {
+  id                String          @id @default(uuid())
+  budgetId          String
+  accountCode       String
+  accountName       String?
+  allocatedAmount   Decimal         @db.Decimal(12, 2)
+  committedAmount   Decimal         @default(0) @db.Decimal(12, 2)
+  spentAmount       Decimal         @default(0) @db.Decimal(12, 2)
+  availableAmount   Decimal         @default(0) @db.Decimal(12, 2)
+  notes             String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  budget            Budget          @relation(fields: [budgetId], references: [id])
+  
+  @@map("budget_allocations")
+}
+
+// ============================================
+// HRMS TABLES - Human Resource Management System
+// ============================================
+
+model Employee {
+  id                String          @id @default(uuid())
+  employeeNumber    String          @unique
+  firstName         String
+  lastName          String
+  fullName          String
+  email             String          @unique
+  phone             String?
+  mobile            String?
+  
+  // Personal Info
+  dateOfBirth       DateTime?
+  gender            Gender?
+  maritalStatus     MaritalStatus?
+  nationality       String?
+  icNumber          String?         @unique
+  passportNumber    String?
+  
+  // Employment Info
+  department        String
+  position          String
+  jobLevel          String?
+  branchId          String?
+  managerId         String?
+  employmentType    EmploymentType  @default(FULL_TIME)
+  employmentStatus  EmployeeStatus  @default(ACTIVE)
+  dateJoined        DateTime
+  dateConfirmed     DateTime?
+  probationEndDate  DateTime?
+  dateResigned      DateTime?
+  terminationReason String?
+  
+  // Compensation
+  basicSalary       Decimal?        @db.Decimal(12, 2)
+  currency          String          @default("MYR")
+  payFrequency      PayFrequency    @default(MONTHLY)
+  bankName          String?
+  bankAccountNumber String?
+  
+  // Emergency Contact
+  emergencyContactName String?
+  emergencyContactPhone String?
+  emergencyContactRelation String?
+  
+  // Address
+  address           String?
+  city              String?
+  state             String?
+  postalCode        String?
+  country           String          @default("Malaysia")
+  
+  isActive          Boolean         @default(true)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  branch            Branch?         @relation(fields: [branchId], references: [id])
+  documents         EmployeeDocument[]
+  attendance        Attendance[]
+  leaveRequests     LeaveRequest[]
+  leaveBalances     LeaveBalance[]
+  payrollEntries    PayrollEntry[]
+  claims            Claim[]
+  performanceReviews PerformanceReview[]
+  performanceGoals  PerformanceGoal[]
+  trainingEnrollments TrainingEnrollment[]
+  interviews        Interview[]
+  
+  @@map("employees")
+}
+
+model EmployeeDocument {
+  id                String          @id @default(uuid())
+  employeeId        String
+  documentType      DocumentType
+  documentName      String
+  fileName          String
+  fileUrl           String
+  fileSize          Int?
+  mimeType          String?
+  issuedBy          String?
+  issuedDate        DateTime?
+  expiryDate        DateTime?
+  notes             String?
+  isActive          Boolean         @default(true)
+  uploadedBy        String
+  uploadedAt        DateTime        @default(now())
+  
+  // Relations
+  employee          Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  
+  @@map("employee_documents")
+}
+
+model Attendance {
+  id                String          @id @default(uuid())
+  employeeId        String
+  attendanceDate    DateTime
+  clockInAt         DateTime?
+  clockOutAt        DateTime?
+  clockInMethod     ClockMethod?
+  clockOutMethod    ClockMethod?
+  clockInLocation   String?
+  clockOutLocation  String?
+  
+  // Work hours
+  scheduledHours    Decimal?        @db.Decimal(4, 2)
+  workedHours       Decimal?        @db.Decimal(4, 2)
+  breakHours        Decimal?        @default(0) @db.Decimal(4, 2)
+  overtimeHours     Decimal?        @default(0) @db.Decimal(4, 2)
+  
+  status            AttendanceStatus @default(PRESENT)
+  isLate            Boolean         @default(false)
+  isEarlyDeparture  Boolean         @default(false)
+  remarks           String?
+  approvedBy        String?
+  approvedAt        DateTime?
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  employee          Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  
+  @@unique([employeeId, attendanceDate])
+  @@map("attendance")
+}
+
+model LeaveRequest {
+  id                String          @id @default(uuid())
+  employeeId        String
+  leaveType         LeaveType
+  startDate         DateTime
+  endDate           DateTime
+  numberOfDays      Decimal         @db.Decimal(4, 1)
+  reason            String?
+  contactDuringLeave String?
+  
+  status            LeaveStatus     @default(PENDING)
+  submittedAt       DateTime        @default(now())
+  approvedBy        String?
+  approvedAt        DateTime?
+  approvalNotes     String?
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  employee          Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  
+  @@map("leave_requests")
+}
+
+model LeaveBalance {
+  id                String          @id @default(uuid())
+  employeeId        String
+  leaveType         LeaveType
+  year              Int
+  entitlement       Decimal         @db.Decimal(5, 1)
+  carriedForward    Decimal         @default(0) @db.Decimal(5, 1)
+  taken             Decimal         @default(0) @db.Decimal(5, 1)
+  pending           Decimal         @default(0) @db.Decimal(5, 1)
+  available         Decimal         @default(0) @db.Decimal(5, 1)
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  employee          Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  
+  @@unique([employeeId, leaveType, year])
+  @@map("leave_balances")
+}
+
+model PayrollPeriod {
+  id                String          @id @default(uuid())
+  name              String
+  year              Int
+  month             Int
+  startDate         DateTime
+  endDate           DateTime
+  paymentDate       DateTime
+  status            PayrollStatus   @default(DRAFT)
+  
+  // Summary
+  totalEmployees    Int             @default(0)
+  totalGrossPay     Decimal         @default(0) @db.Decimal(14, 2)
+  totalDeductions   Decimal         @default(0) @db.Decimal(14, 2)
+  totalNetPay       Decimal         @default(0) @db.Decimal(14, 2)
+  
+  // Statutory
+  totalEpfEmployer  Decimal         @default(0) @db.Decimal(14, 2)
+  totalEpfEmployee  Decimal         @default(0) @db.Decimal(14, 2)
+  totalSocso        Decimal         @default(0) @db.Decimal(14, 2)
+  totalEis          Decimal         @default(0) @db.Decimal(14, 2)
+  totalPcb          Decimal         @default(0) @db.Decimal(14, 2)
+  
+  processedBy       String?
+  processedAt       DateTime?
+  postedToGl        Boolean         @default(false)
+  glEntryId         String?
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  entries           PayrollEntry[]
+  
+  @@unique([year, month])
+  @@map("payroll_periods")
+}
+
+model PayrollEntry {
+  id                String          @id @default(uuid())
+  periodId          String
+  employeeId        String
+  
+  // Earnings
+  basicSalary       Decimal         @db.Decimal(12, 2)
+  overtimePay       Decimal         @default(0) @db.Decimal(12, 2)
+  allowances        Decimal         @default(0) @db.Decimal(12, 2)
+  bonuses           Decimal         @default(0) @db.Decimal(12, 2)
+  grossPay          Decimal         @db.Decimal(12, 2)
+  
+  // Deductions - Statutory
+  epfEmployee       Decimal         @default(0) @db.Decimal(12, 2)
+  socsoEmployee     Decimal         @default(0) @db.Decimal(12, 2)
+  eisEmployee       Decimal         @default(0) @db.Decimal(12, 2)
+  pcb               Decimal         @default(0) @db.Decimal(12, 2)
+  
+  // Deductions - Other
+  advances          Decimal         @default(0) @db.Decimal(12, 2)
+  loans             Decimal         @default(0) @db.Decimal(12, 2)
+  otherDeductions   Decimal         @default(0) @db.Decimal(12, 2)
+  totalDeductions   Decimal         @db.Decimal(12, 2)
+  
+  netPay            Decimal         @db.Decimal(12, 2)
+  
+  // Employer contributions
+  epfEmployer       Decimal         @default(0) @db.Decimal(12, 2)
+  socsoEmployer     Decimal         @default(0) @db.Decimal(12, 2)
+  eisEmployer       Decimal         @default(0) @db.Decimal(12, 2)
+  
+  payslipGenerated  Boolean         @default(false)
+  payslipUrl        String?
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  period            PayrollPeriod   @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  employee          Employee        @relation(fields: [employeeId], references: [id])
+  
+  @@unique([periodId, employeeId])
+  @@map("payroll_entries")
+}
+
+model Claim {
+  id                String          @id @default(uuid())
+  employeeId        String
+  claimNumber       String          @unique
+  claimType         ClaimType
+  claimDate         DateTime
+  description       String
+  currency          String          @default("MYR")
+  totalAmount       Decimal         @db.Decimal(12, 2)
+  receiptCount      Int             @default(0)
+  
+  status            ClaimStatus     @default(DRAFT)
+  submittedAt       DateTime?
+  approvedBy        String?
+  approvedAt        DateTime?
+  approvalNotes     String?
+  paidAt            DateTime?
+  paidBy            String?
+  paymentReference  String?
+  
+  notes             String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  employee          Employee        @relation(fields: [employeeId], references: [id])
+  lines             ClaimLine[]
+  approvals         ClaimApproval[]
+  
+  @@map("claims")
+}
+
+model ClaimLine {
+  id                String          @id @default(uuid())
+  claimId           String
+  lineNumber        Int
+  expenseDate       DateTime
+  category          String
+  description       String
+  amount            Decimal         @db.Decimal(12, 2)
+  receiptUrl        String?
+  isPersonalCar     Boolean         @default(false)
+  distanceKm        Decimal?        @db.Decimal(8, 2)
+  ratePerKm         Decimal?        @db.Decimal(6, 2)
+  gstAmount         Decimal?        @default(0) @db.Decimal(12, 2)
+  notes             String?
+  createdAt         DateTime        @default(now())
+  
+  // Relations
+  claim             Claim           @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  
+  @@map("claim_lines")
+}
+
+model ClaimApproval {
+  id                String          @id @default(uuid())
+  claimId           String
+  approverLevel     Int
+  approverId        String?
+  approverName      String?
+  action            ApprovalAction?
+  actionAt          DateTime?
+  comments          String?
+  isCurrent         Boolean         @default(false)
+  createdAt         DateTime        @default(now())
+  
+  // Relations
+  claim             Claim           @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  
+  @@map("claim_approvals")
+}
+
+model PerformanceReview {
+  id                String          @id @default(uuid())
+  employeeId        String
+  reviewPeriod      String          // YYYY-MM
+  reviewType        ReviewType      @default(ANNUAL)
+  
+  // Ratings
+  overallRating     Decimal?        @db.Decimal(3, 2)
+  performanceScore  Decimal?        @db.Decimal(5, 2)
+  competencyScore   Decimal?        @db.Decimal(5, 2)
+  
+  // Review content
+  achievements      String?
+  areasForImprovement String?
+  employeeComments  String?
+  managerComments   String?
+  goalsForNextPeriod String?
+  
+  status            ReviewStatus    @default(PENDING)
+  reviewedBy        String
+  reviewDate        DateTime?
+  
+  isPromotionRecommended Boolean    @default(false)
+  salaryAdjustmentPercent Decimal?   @db.Decimal(5, 2)
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  employee          Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  
+  @@map("performance_reviews")
+}
+
+model PerformanceGoal {
+  id                String          @id @default(uuid())
+  employeeId        String
+  title             String
+  description       String?
+  category          String?
+  targetValue       String?
+  actualValue       String?
+  unitOfMeasure     String?
+  startDate         DateTime
+  targetDate        DateTime
+  weightage         Decimal?        @db.Decimal(5, 2)
+  
+  status            GoalStatus      @default(ACTIVE)
+  progress          Int             @default(0)
+  
+  createdBy         String
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  completedAt       DateTime?
+  
+  // Relations
+  employee          Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  
+  @@map("performance_goals")
+}
+
+model TrainingCourse {
+  id                String          @id @default(uuid())
+  courseCode        String          @unique
+  title             String
+  description       String?
+  category          String?
+  provider          String?
+  trainer           String?
+  durationHours     Decimal?        @db.Decimal(5, 2)
+  costPerPerson     Decimal?        @db.Decimal(12, 2)
+  currency          String          @default("MYR")
+  location          String?
+  isOnline          Boolean         @default(false)
+  certificateIssued Boolean         @default(false)
+  validityMonths    Int?
+  isActive          Boolean         @default(true)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  enrollments       TrainingEnrollment[]
+  
+  @@map("training_courses")
+}
+
+model TrainingEnrollment {
+  id                String          @id @default(uuid())
+  courseId          String
+  employeeId        String
+  
+  enrollmentDate    DateTime        @default(now())
+  scheduledDate     DateTime?
+  completionDate    DateTime?
+  status            EnrollmentStatus @default(PENDING)
+  
+  score             Decimal?        @db.Decimal(5, 2)
+  result            String?         // Pass, Fail, Distinction
+  certificateNumber String?
+  certificateUrl    String?
+  expiryDate        DateTime?
+  
+  feedback          String?
+  cost              Decimal?        @db.Decimal(12, 2)
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  course            TrainingCourse  @relation(fields: [courseId], references: [id])
+  employee          Employee        @relation(fields: [employeeId], references: [id])
+  
+  @@map("training_enrollments")
+}
+
+model RecruitmentRequisition {
+  id                String          @id @default(uuid())
+  requisitionNumber String          @unique
+  position          String
+  department        String
+  branchId          String?
+  employmentType    EmploymentType  @default(FULL_TIME)
+  numberOfPositions Int             @default(1)
+  justification     String?
+  requirements      String?
+  responsibilities  String?
+  minSalary         Decimal?        @db.Decimal(12, 2)
+  maxSalary         Decimal?        @db.Decimal(12, 2)
+  currency          String          @default("MYR")
+  
+  status            RequisitionStatus @default(DRAFT)
+  requestedBy       String
+  requestedAt       DateTime        @default(now())
+  approvedBy        String?
+  approvedAt        DateTime?
+  targetStartDate   DateTime?
+  
+  positionsFilled   Int             @default(0)
+  closedAt          DateTime?
+  closedBy          String?
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  candidates        Candidate[]
+  interviews        Interview[]
+  
+  @@map("recruitment_requisitions")
+}
+
+model Candidate {
+  id                String          @id @default(uuid())
+  requisitionId     String?
+  firstName         String
+  lastName          String
+  email             String
+  phone             String?
+  
+  source            String?         // LinkedIn, JobStreet, Referral, etc
+  referralBy        String?
+  
+  resumeUrl         String?
+  expectedSalary    Decimal?        @db.Decimal(12, 2)
+  currentEmployer   String?
+  currentPosition   String?
+  yearsOfExperience Decimal?        @db.Decimal(4, 1)
+  highestEducation  String?
+  
+  status            CandidateStatus @default(NEW)
+  appliedAt         DateTime        @default(now())
+  
+  notes             String?
+  rating            Int?            // 1-5
+  
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  requisition       RecruitmentRequisition? @relation(fields: [requisitionId], references: [id])
+  interviews        Interview[]
+  
+  @@map("candidates")
+}
+
+model Interview {
+  id                String          @id @default(uuid())
+  requisitionId     String
+  candidateId       String
+  employeeId        String?
+  
+  interviewType     InterviewType   @default(FACE_TO_FACE)
+  scheduledAt       DateTime
+  durationMinutes   Int             @default(60)
+  location          String?
+  meetingLink       String?
+  
+  interviewers      Json?           // Array of interviewer IDs/names
+  
+  status            InterviewStatus @default(SCHEDULED)
+  
+  technicalScore    Int?
+  communicationScore Int?
+  culturalFitScore  Int?
+  overallScore      Int?
+  
+  feedback          String?
+  recommendation    String?         // Hire, Reject, Second Interview
+  
+  conductedAt       DateTime?
+  createdBy         String
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  requisition       RecruitmentRequisition @relation(fields: [requisitionId], references: [id])
+  candidate         Candidate       @relation(fields: [candidateId], references: [id])
+  employee          Employee?       @relation(fields: [employeeId], references: [id])
+  
+  @@map("interviews")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  MANAGER
+  USER
+  GUEST
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  PENDING
+}
+
+enum AssetStatus {
+  ACTIVE
+  INACTIVE
+  MAINTENANCE
+  RETIRED
+  DISPOSED
+}
+
+enum AssetCondition {
+  EXCELLENT
+  GOOD
+  FAIR
+  POOR
+  CRITICAL
+}
+
+enum DepreciationMethod {
+  STRAIGHT_LINE
+  DECLINING_BALANCE
+  SUM_OF_YEARS_DIGITS
+}
+
+enum ScheduleType {
+  TIME_BASED
+  USAGE_BASED
+  CONDITION_BASED
+}
+
+enum MaintenancePriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum WorkOrderStatus {
+  PENDING
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  ON_HOLD
+}
+
+enum RepairStatus {
+  OPEN
+  ASSIGNED
+  IN_PROGRESS
+  WAITING_PARTS
+  COMPLETED
+  CLOSED
+  CANCELLED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum WarrantyType {
+  MANUFACTURER
+  EXTENDED
+  THIRD_PARTY
+}
+
+enum ClaimStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  REIMBURSED
+  CLOSED
+}
+
+enum AbcClass {
+  A
+  B
+  C
+}
+
+enum TransactionType {
+  RECEIPT
+  ISSUE
+  ADJUSTMENT
+  RETURN
+  TRANSFER
+}
+
+enum PRStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  PARTIALLY_ORDERED
+  FULLY_ORDERED
+  CLOSED
+  CANCELLED
+}
+
+enum ApprovalAction {
+  APPROVED
+  REJECTED
+  RETURNED
+}
+
+enum VendorStatus {
+  ACTIVE
+  INACTIVE
+  PENDING
+  BLACKLISTED
+}
+
+enum QuotationStatus {
+  REQUESTED
+  RECEIVED
+  UNDER_REVIEW
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+enum POStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SENT_TO_VENDOR
+  PARTIALLY_RECEIVED
+  FULLY_RECEIVED
+  CLOSED
+  CANCELLED
+}
+
+enum InspectionResult {
+  PENDING
+  PASSED
+  PASSED_WITH_CONDITIONS
+  FAILED
+}
+
+enum InvoiceStatus {
+  PENDING
+  APPROVED
+  PARTIALLY_PAID
+  PAID
+  DISPUTED
+  CANCELLED
+}
+
+enum MatchingStatus {
+  UNMATCHED
+  PARTIAL_MATCH
+  MATCHED_WITH_VARIANCE
+  FULLY_MATCHED
+}
+
+enum BudgetStatus {
+  DRAFT
+  ACTIVE
+  FROZEN
+  CLOSED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+enum MaritalStatus {
+  SINGLE
+  MARRIED
+  DIVORCED
+  WIDOWED
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERN
+  FREELANCE
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  ON_LEAVE
+  SUSPENDED
+  RESIGNED
+  TERMINATED
+  RETIRED
+}
+
+enum PayFrequency {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+
+enum DocumentType {
+  IC
+  PASSPORT
+  DRIVING_LICENSE
+  ACADEMIC_CERTIFICATE
+  PROFESSIONAL_CERT
+  CONTRACT
+  PAYSILIP
+  TAX_FORM
+  MEDICAL_CERT
+  VISA
+  OTHER
+}
+
+enum ClockMethod {
+  BIOMETRIC
+  MOBILE_GPS
+  WEB
+  MANUAL
+  CARD
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  ON_LEAVE
+  HOLIDAY
+  REST_DAY
+  HALF_DAY
+}
+
+enum LeaveType {
+  ANNUAL
+  MEDICAL
+  UNPAID
+  MATERNITY
+  PATERNITY
+  COMPASSIONATE
+  STUDY
+  SABBATICAL
+  EMERGENCY
+  PUBLIC_HOLIDAY
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+  TAKEN
+}
+
+enum PayrollStatus {
+  DRAFT
+  PROCESSING
+  COMPLETED
+  POSTED
+  CLOSED
+}
+
+enum ClaimType {
+  MEDICAL
+  TRAVEL
+  ENTERTAINMENT
+  MEAL
+  TRANSPORT
+  PHONE
+  TRAINING
+  OTHER
+}
+
+enum ClaimStatus {
+  DRAFT
+  SUBMITTED
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  PROCESSING_PAYMENT
+  PAID
+}
+
+enum ReviewType {
+  PROBATION
+  ANNUAL
+  MID_YEAR
+  PROMOTION
+  AD_HOC
+}
+
+enum ReviewStatus {
+  PENDING
+  SELF_REVIEW
+  MANAGER_REVIEW
+  COMPLETED
+  ACKNOWLEDGED
+}
+
+enum GoalStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  ON_HOLD
+}
+
+enum EnrollmentStatus {
+  PENDING
+  ENROLLED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum RequisitionStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  IN_PROGRESS
+  ON_HOLD
+  CLOSED
+  CANCELLED
+}
+
+enum CandidateStatus {
+  NEW
+  SCREENING
+  PHONE_INTERVIEW
+  INTERVIEW
+  ASSESSMENT
+  OFFER_PENDING
+  OFFER_ACCEPTED
+  OFFER_REJECTED
+  HIRED
+  REJECTED
+  WITHDRAWN
+}
+
+enum InterviewType {
+  PHONE
+  VIDEO
+  FACE_TO_FACE
+  ASSESSMENT
+  PANEL
+}
+
+enum InterviewStatus {
+  SCHEDULED
+  RESCHEDULED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
