@@ -415,6 +415,76 @@ export default function AssetDetailPage({ params }: { params: { id: string } }) 
           </div>
         )}
       </div>
+
+      {/* Full Depreciation Schedule */}
+      <div className="mt-8">
+        <h2 className="text-lg font-semibold mb-4">Depreciation Schedule</h2>
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left font-medium text-gray-700">Period</th>
+                  <th className="px-4 py-3 text-right font-medium text-gray-700">Opening Value</th>
+                  <th className="px-4 py-3 text-right font-medium text-gray-700">Depreciation</th>
+                  <th className="px-4 py-3 text-right font-medium text-gray-700">Accumulated</th>
+                  <th className="px-4 py-3 text-right font-medium text-gray-700">Book Value</th>
+                  <th className="px-4 py-3 text-center font-medium text-gray-700">% Depreciated</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {depreciationSchedule.map((entry, idx) => {
+                  const openingValue = entry.bookValue + entry.depreciation;
+                  const percentDepreciated = ((asset.acquisitionCost - entry.bookValue) / asset.acquisitionCost) * 100;
+                  
+                  return (
+                    <tr key={idx} className={idx % 12 === 0 ? "bg-blue-50/50" : ""}>
+                      <td className="px-4 py-2 font-medium">{entry.month}</td>
+                      <td className="px-4 py-2 text-right">{formatCurrency(openingValue)}</td>
+                      <td className="px-4 py-2 text-right text-red-600">-{formatCurrency(entry.depreciation)}</td>
+                      <td className="px-4 py-2 text-right">{formatCurrency(entry.accumulated)}</td>
+                      <td className="px-4 py-2 text-right font-medium">{formatCurrency(entry.bookValue)}</td>
+                      <td className="px-4 py-2 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <div className="w-16 bg-gray-200 rounded-full h-2">
+                            <div
+                              className="bg-blue-600 h-2 rounded-full"
+                              style={{ width: `${Math.min(percentDepreciated, 100)}%` }}
+                            />
+                          </div>
+                          <span className="text-xs">{percentDepreciated.toFixed(1)}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* Depreciation Summary Cards */}
+      <div className="mt-8 grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="bg-white border border-gray-200 p-4 rounded-lg">
+          <p className="text-sm text-gray-600">Total Cost</p>
+          <p className="text-xl font-bold">{formatCurrency(asset.acquisitionCost)}</p>
+        </div>
+        <div className="bg-white border border-gray-200 p-4 rounded-lg">
+          <p className="text-sm text-gray-600">Salvage Value (10%)</p>
+          <p className="text-xl font-bold">{formatCurrency(asset.acquisitionCost * 0.1)}</p>
+        </div>
+        <div className="bg-white border border-gray-200 p-4 rounded-lg">
+          <p className="text-sm text-gray-600">Depreciable Amount</p>
+          <p className="text-xl font-bold">{formatCurrency(asset.acquisitionCost * 0.9)}</p>
+        </div>
+        <div className="bg-white border border-gray-200 p-4 rounded-lg">
+          <p className="text-sm text-gray-600">Monthly Depreciation</p>
+          <p className="text-xl font-bold">
+            {formatCurrency((asset.acquisitionCost * 0.9) / (asset.usefulLifeYears * 12))}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

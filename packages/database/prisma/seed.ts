@@ -36,13 +36,18 @@ async function main() {
   console.log(`   - Assets: ${emsData.assets.length}`);
   console.log(`   - Maintenance Records: ${emsData.maintenanceRecords.length}`);
   console.log(`   - Repair Orders: ${emsData.repairOrders.length}`);
+  console.log(`   - Depreciation Entries: Created for all assets`);
   console.log(`   - Vendors: ${psData.vendors.length}`);
   console.log(`   - Purchase Requisitions: ${psData.prs.length}`);
   console.log(`   - Purchase Orders: ${psData.pos.length}`);
+  console.log(`   - Invoices (with 3-way matching): ${psData.invoices?.length || 0}`);
   console.log(`   - Employees: ${hrmsData.employees.length}`);
   console.log(`   - Payroll Periods: ${hrmsData.payrollPeriods.length}`);
+  console.log(`   - Payroll Entries: ${hrmsData.employees.length * hrmsData.payrollPeriods.length}`);
   console.log(`   - Leave Requests: ${hrmsData.leaveRequests.length}`);
   console.log(`   - Claims: ${hrmsData.claims.length}`);
+  console.log(`   - Attendance Records: 320+`);
+  console.log(`\n📈 Total Records: ${branches.length + users.length + emsData.assets.length + emsData.maintenanceRecords.length + emsData.repairOrders.length + psData.vendors.length + psData.prs.length + psData.pos.length + (psData.invoices?.length || 0) + hrmsData.employees.length + hrmsData.payrollPeriods.length + hrmsData.leaveRequests.length + hrmsData.claims.length + 320}+`);
 }
 
 async function clearDatabase() {
@@ -332,6 +337,43 @@ async function createEMSData(branches: any[]) {
     });
   }
 
+  // Depreciation Entries for each asset
+  for (const asset of assets) {
+    const acquisitionDate = new Date(asset.acquisitionDate);
+    const now = new Date();
+    const salvageValue = Number(asset.acquisitionCost) * 0.1; // 10% salvage
+    const depreciableAmount = Number(asset.acquisitionCost) - salvageValue;
+    const monthlyDepreciation = depreciableAmount / (asset.usefulLifeYears * 12);
+    
+    let accumulatedDepreciation = 0;
+    let currentMonth = new Date(acquisitionDate);
+    currentMonth.setMonth(currentMonth.getMonth() + 1); // Start from next month
+    
+    while (currentMonth <= now && accumulatedDepreciation < depreciableAmount) {
+      const year = currentMonth.getFullYear();
+      const month = currentMonth.getMonth() + 1;
+      const depreciationAmount = Math.min(monthlyDepreciation, depreciableAmount - accumulatedDepreciation);
+      accumulatedDepreciation += depreciationAmount;
+      const bookValue = Number(asset.acquisitionCost) - accumulatedDepreciation;
+      
+      await prisma.depreciationEntry.create({
+        data: {
+          assetId: asset.id,
+          periodYear: year,
+          periodMonth: month,
+          method: asset.depreciationMethod,
+          openingValue: bookValue + depreciationAmount,
+          depreciationAmount,
+          accumulatedDepreciation,
+          closingValue: bookValue,
+          postedToGl: true,
+        }
+      });
+      
+      currentMonth.setMonth(currentMonth.getMonth() + 1);
+    }
+  }
+
   return { assets, categories, locations, maintenanceRecords, repairOrders, spareParts, schedules };
 }
 
@@ -485,38 +527,86 @@ async function createPSData(branches: any[]) {
     }
   }
 
-  // Invoices
-  for (let i = 1; i <= 20; i++) {
+  // Invoices with 3-Way Matching data
+  const invoices: any[] = [];
+  const matchingStatuses = [MatchingStatus.FULLY_MATCHED, MatchingStatus.FULLY_MATCHED, MatchingStatus.PARTIAL_MATCH, MatchingStatus.UNMATCHED, MatchingStatus.MATCHED_WITH_VARIANCE];
+  
+  for (let i = 1; i <= 30; i++) {
     const po = pos[i % pos.length];
-    await prisma.invoice.create({
+    const grn = await prisma.goodsReceipt.findFirst({ where: { poId: po.id } });
+    const matchingStatus = matchingStatuses[i % matchingStatuses.length];
+    
+    // Calculate variance based on matching status
+    let invoiceSubtotal = po.subtotal;
+    let variance = 0;
+    let variancePercent = 0;
+    
+    if (matchingStatus === MatchingStatus.PARTIAL_MATCH) {
+      invoiceSubtotal = po.subtotal * 0.7; // 30% variance
+      variance = po.subtotal - invoiceSubtotal;
+      variancePercent = 30;
+    } else if (matchingStatus === MatchingStatus.MATCHED_WITH_VARIANCE) {
+      invoiceSubtotal = po.subtotal * 0.98; // 2% variance (within tolerance)
+      variance = po.subtotal - invoiceSubtotal;
+      variancePercent = 2;
+    } else if (matchingStatus === MatchingStatus.UNMATCHED) {
+      invoiceSubtotal = po.subtotal * 1.15; // 15% variance (outside tolerance)
+      variance = po.subtotal - invoiceSubtotal;
+      variancePercent = 15;
+    }
+    
+    const invoice = await prisma.invoice.create({
       data: {
         invoiceNumber: `INV-${String(i).padStart(5, '0')}`,
         poId: po.id,
         vendorId: po.vendorId,
+        grnId: grn?.id,
         invoiceDate: new Date(2024, (i % 12), 25),
         dueDate: new Date(2024, (i % 12) + 1, 25),
-        subtotal: po.subtotal,
-        taxAmount: po.taxAmount,
-        totalAmount: po.totalAmount,
-        balanceDue: i % 3 === 0 ? 0 : po.totalAmount,
+        subtotal: invoiceSubtotal,
+        taxAmount: invoiceSubtotal * 0.06,
+        totalAmount: invoiceSubtotal * 1.06,
+        balanceDue: i % 3 === 0 ? 0 : invoiceSubtotal * 1.06,
         status: i % 3 === 0 ? InvoiceStatus.PAID : InvoiceStatus.PENDING,
-        matchingStatus: i % 2 === 0 ? MatchingStatus.FULLY_MATCHED : MatchingStatus.UNMATCHED,
+        matchingStatus,
+        poAmount: po.totalAmount,
+        grnAmount: grn ? po.totalAmount : null,
+        variance,
+        variancePercent,
+        tolerancePercent: 5,
+      }
+    });
+    invoices.push(invoice);
+
+    // Create Invoice Lines
+    await prisma.invoiceLine.create({
+      data: {
+        invoiceId: invoice.id,
+        lineNumber: 1,
+        description: `Invoice line for ${po.poNumber}`,
+        quantity: 20 + (i % 30),
+        unitOfMeasure: 'pcs',
+        unitPrice: invoiceSubtotal / (20 + (i % 30)),
+        totalPrice: invoiceSubtotal,
       }
     });
   }
 
-  return { vendors, budgets, prs, pos };
+  // Create Three-Way Matching Records (can be stored as audit/matching log if needed)
+  // For now, the Invoice model with matchingStatus serves this purpose
+
+  return { vendors, budgets, prs, pos, invoices };
 }
 
 async function createHRMSData(branches: any[]) {
-  // Create 100+ Employees
-  const firstNames = ['Ahmad', 'Mohammad', 'Nurul', 'Siti', 'Abdul', 'Muhammad', 'Aminah', 'Fatimah', 'Ismail', 'Ibrahim', 'Kumar', 'Rajesh', 'Tan', 'Lim', 'Wong', 'Chan', 'Lee', 'Goh', 'Ng', 'Chong', 'Siva', 'Ravi', 'Muthu', 'Wei', 'Hui', 'Ming', 'Ying', 'John', 'David', 'Michael', 'Sarah', 'Emma', 'Jessica', 'Sakura', 'Yuki', 'Mei'];
-  const lastNames = ['Abdullah', 'Ahmad', 'Ali', 'Hassan', 'Hussein', 'Ismail', 'Ibrahim', 'Rahman', 'Tan', 'Lee', 'Lim', 'Wong', 'Chan', 'Ng', 'Chong', 'Goh', 'Koh', 'Kumar', 'Singh', 'Nair', 'Rao', 'Menon', 'Raj', 'Prem', 'Siva', 'Subramaniam', 'Chen', 'Wang', 'Liu', 'Zhang', 'Kim', 'Park', 'Suzuki', 'Tanaka', 'Smith', 'Johnson', 'Williams', 'Brown', 'Jones'];
-  const departments = ['Operations', 'Maintenance', 'Procurement', 'HR', 'Finance', 'IT', 'Admin', 'Sales', 'Warehouse', 'Safety'];
-  const positions = ['Manager', 'Supervisor', 'Officer', 'Executive', 'Technician', 'Operator', 'Clerk', 'Coordinator', 'Specialist', 'Assistant'];
+  // Create 150+ Employees
+  const firstNames = ['Ahmad', 'Mohammad', 'Nurul', 'Siti', 'Abdul', 'Muhammad', 'Aminah', 'Fatimah', 'Ismail', 'Ibrahim', 'Kumar', 'Rajesh', 'Tan', 'Lim', 'Wong', 'Chan', 'Lee', 'Goh', 'Ng', 'Chong', 'Siva', 'Ravi', 'Muthu', 'Wei', 'Hui', 'Ming', 'Ying', 'John', 'David', 'Michael', 'Sarah', 'Emma', 'Jessica', 'Sakura', 'Yuki', 'Mei', 'Hassan', 'Razak', 'Osman', 'Farid', 'Zulkifli', 'Azman', 'Fauzi', 'Hamzah', 'Imran', 'Johan', 'Kamal', 'Luqman', 'Musa', 'Nasir'];
+  const lastNames = ['Abdullah', 'Ahmad', 'Ali', 'Hassan', 'Hussein', 'Ismail', 'Ibrahim', 'Rahman', 'Tan', 'Lee', 'Lim', 'Wong', 'Chan', 'Ng', 'Chong', 'Goh', 'Koh', 'Kumar', 'Singh', 'Nair', 'Rao', 'Menon', 'Raj', 'Prem', 'Siva', 'Subramaniam', 'Chen', 'Wang', 'Liu', 'Zhang', 'Kim', 'Park', 'Suzuki', 'Tanaka', 'Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Davis', 'Miller', 'Wilson', 'Moore', 'Taylor', 'Anderson', 'Thomas', 'Jackson', 'White', 'Harris', 'Martin'];
+  const departments = ['Operations', 'Maintenance', 'Procurement', 'HR', 'Finance', 'IT', 'Admin', 'Sales', 'Warehouse', 'Safety', 'Engineering', 'Quality', 'Logistics'];
+  const positions = ['Manager', 'Supervisor', 'Officer', 'Executive', 'Technician', 'Operator', 'Clerk', 'Coordinator', 'Specialist', 'Assistant', 'Engineer', 'Analyst', 'Consultant', 'Director', 'VP'];
 
   const employees: any[] = [];
-  for (let i = 1; i <= 105; i++) {
+  for (let i = 1; i <= 155; i++) {
     const firstName = firstNames[i % firstNames.length];
     const lastName = lastNames[i % lastNames.length];
     const dept = departments[i % departments.length];
@@ -617,9 +707,9 @@ async function createHRMSData(branches: any[]) {
     }
   }
 
-  // Leave Requests
+  // Leave Requests - 80+ records
   const leaveRequests: any[] = [];
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 80; i++) {
     const emp = employees[i % employees.length];
     const leaveType = [LeaveType.ANNUAL, LeaveType.MEDICAL, LeaveType.UNPAID, LeaveType.EMERGENCY][i % 4];
     const startDate = new Date(2024, (i % 12), 10 + (i % 10));
@@ -670,9 +760,9 @@ async function createHRMSData(branches: any[]) {
     });
   }
 
-  // Claims
+  // Claims - 60+ records
   const claims: any[] = [];
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 60; i++) {
     const emp = employees[i % employees.length];
     const claimType = [ClaimTypeEnum.MEDICAL, ClaimTypeEnum.TRAVEL, ClaimTypeEnum.MEAL, ClaimTypeEnum.TRANSPORT][i % 4];
     
@@ -707,8 +797,8 @@ async function createHRMSData(branches: any[]) {
     });
   }
 
-  // Attendance Records
-  for (let i = 0; i < 200; i++) {
+  // Attendance Records - 300+ records
+  for (let i = 0; i < 320; i++) {
     const emp = employees[i % employees.length];
     const date = new Date(2024, Math.floor(i / 20) % 12, (i % 28) + 1);
     

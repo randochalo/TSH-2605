@@ -51,6 +51,11 @@ const menuItems = [
       { title: "Recruitment", href: "/hrms/recruitment" },
     ],
   },
+  {
+    title: "Reports",
+    href: "/reports",
+    icon: "📈",
+  },
 ];
 
 export function Sidebar() {
